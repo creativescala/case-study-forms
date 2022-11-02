@@ -33,7 +33,7 @@ object Field {
       style: Style.BooleanStyle,
       label: Option[String],
       initialValue: Option[Boolean]
-  ) extends Field[String] {
+  ) extends Field[Boolean] {
     def withStyle(style: Style.BooleanStyle): BooleanField =
       this.copy(style = style)
 
