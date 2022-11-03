@@ -6,11 +6,23 @@ import forms.Style.BooleanStyle._
 
 object Render {
   def render[A](form: Form[A]): HtmlElement = {
-    val (fieldsHtml, _) = renderField(form.fields)
-    div(
-      h1(className := "text-4xl font-bold mb-4", form.title),
-      fieldsHtml
-    )
+    val (fieldsHtml, fieldsSignal) = renderField(form.fields)
+    val submitted = new EventBus[Unit]
+    val onSubmitted = (a: A) => println(a)
+    val html =
+      div(
+        h1(className := "text-4xl font-bold mb-4", form.title),
+        fieldsHtml,
+        button(
+          className := "ring-2 ring-sky-500 rounded-md border-2 border-sky-500 p-2 m-2 text-sky-500",
+          typ := "submit",
+          onClick.mapTo(()) --> submitted.writer,
+          "Submit"
+        ),
+        submitted.events.sample(fieldsSignal) --> onSubmitted
+      )
+
+    html
   }
 
   def renderField[A](field: Field[A]): (HtmlElement, Signal[A]) = {
@@ -23,7 +35,7 @@ object Render {
         input: HtmlElement
     ): HtmlElement =
       div(
-        className := "grid grid-cols-4 gap-2",
+        className := "grid grid-cols-4 gap-2 p-2",
         renderLabel(label),
         renderInput(input)
       )
