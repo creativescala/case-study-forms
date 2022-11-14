@@ -18,8 +18,14 @@ object Main {
   val question = weather.product(awesome)
   val form = Form("The Awesome Form", question)
 
-  val appElement: HtmlElement =
-    Render.render(form)
+  val appElement: HtmlElement = {
+    val (html, output) = Render.render(form)
+    div(
+      html,
+      h2(className := "text-xl font-bold mb-2", "Submission"),
+      p(child <-- output.map(_.toString))
+    )
+  }
 
   def main(args: Array[String]): Unit =
     renderOnDomContentLoaded(appContainer, appElement)

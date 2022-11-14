@@ -5,12 +5,13 @@ import forms.Field._
 import forms.Style.BooleanStyle._
 
 object Render {
-  def render[A](form: Form[A]): HtmlElement = {
+  def render[A](form: Form[A]): (HtmlElement, EventStream[A]) = {
     val (fieldsHtml, fieldsSignal) = renderField(form.fields)
     val submitted = new EventBus[Unit]
-    val onSubmitted = (a: A) => println(a)
+    val output = new EventBus[A]
     val html =
       div(
+        className := "mb-4",
         h1(className := "text-4xl font-bold mb-4", form.title),
         fieldsHtml,
         button(
@@ -19,10 +20,10 @@ object Render {
           onClick.mapTo(()) --> submitted.writer,
           "Submit"
         ),
-        submitted.events.sample(fieldsSignal) --> onSubmitted
+        submitted.events.sample(fieldsSignal) --> output
       )
 
-    html
+    (html, output.events)
   }
 
   def renderField[A](field: Field[A]): (HtmlElement, Signal[A]) = {
@@ -31,24 +32,24 @@ object Render {
     def renderInput(input: HtmlElement): HtmlElement =
       div(className := "col-span-3", input)
     def renderValidation(
-        validationState: Signal[ValidationState]
+        validationState: Signal[ValidationState[A]]
     ): HtmlElement =
       p(
         className <-- validationState.map(v =>
-          if (v.toOption.isDefined) "visible col-end-5 col-span-3 text-red-500"
+          if (v.toReasons.isDefined) "visible col-end-5 col-span-3 text-red-500"
           else "invisible p-2"
         ),
         child <-- validationState.map(v =>
-          v.toOption match {
-            case Some(message) => message
-            case None          => ""
+          v.toReasons match {
+            case Some(messages) => messages.toChain.toList.mkString(",")
+            case None           => ""
           }
         )
       )
     def renderLabelAndInput(
         label: Option[String],
         input: HtmlElement,
-        validationState: Signal[ValidationState]
+        validationState: Signal[ValidationState[A]]
     ): HtmlElement =
       div(
         className := "grid grid-cols-4 gap-x-2 gap-y-1 p-2",
@@ -59,12 +60,17 @@ object Render {
 
     field match {
       case TextField(label, iV, ph, validation) =>
-        val validationState = Var(ValidationState.unchecked)
-        val validate: Observer[String] =
-          validationState.writer.contramap(str =>
-            ValidationState.fromEither(validation(str))
-          )
-        val output = Var(iV.getOrElse(""))
+        val state = Var(ValueState.uncommitted[String])
+        val validationState = state.signal.map(state =>
+          state match {
+            case ValueState.Uncommitted => ValidationState.unchecked[String]
+            case ValueState.Committed(v) =>
+              ValidationState.fromEither(validation(v))
+          }
+        )
+        val output = Var("")
+        val commitValue =
+          state.writer.contramap[String](v => ValueState.committed(v))
         val html =
           renderLabelAndInput(
             label,
@@ -77,8 +83,12 @@ object Render {
                 iV.map(iV => value := iV)
                   .orElse(ph.map(ph => placeholder := ph)),
                 onInput.mapToValue --> output,
-                onBlur.mapToValue --> validate,
-                onChange.mapToValue --> validate
+                onInput.mapToValue --> state.writer.contramapOpt[String](v =>
+                  if (state.now().isUncommitted) None
+                  else Some(ValueState.committed(v))
+                ),
+                onBlur.mapToValue --> commitValue,
+                onChange.mapToValue --> commitValue
               )
             ),
             validationState.signal
@@ -96,10 +106,11 @@ object Render {
                   className := "col-span-3",
                   input(
                     className := "mr-2 my-2 border-2 border-sky-500",
-                    typ := "checkbox"
+                    typ := "checkbox",
+                    onClick.mapToChecked --> output
                   )
                 ),
-                Signal.fromValue(ValidationState.valid)
+                Signal.fromValue(ValidationState.valid(output.now()))
               )
             case Choice(trueChoice @ _, falseChoice @ _) =>
               renderLabelAndInput(
@@ -108,7 +119,7 @@ object Render {
                   className := "col-span-3",
                   input(typ := "checkbox")
                 ),
-                Signal.fromValue(ValidationState.valid)
+                Signal.fromValue(ValidationState.valid(output.now()))
               )
           }
 
