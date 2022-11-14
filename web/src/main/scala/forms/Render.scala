@@ -5,29 +5,6 @@ import forms.Field._
 import forms.Style.BooleanStyle._
 
 object Render {
-  sealed trait FieldState[+A]
-  object FieldState {
-
-    /** Field has been created but there has not been any user input */
-    case object Initialized extends FieldState[Nothing]
-
-    /** Field has invalid user input */
-    final case class Invalid(reason: String) extends FieldState[Nothing]
-
-    /** Field has valid user input */
-    final case class Valid[A](value: A) extends FieldState[A]
-
-    def initialized[A]: FieldState[A] = Initialized
-    def invalid[A](reason: String): FieldState[A] = Invalid(reason)
-    def valid[A](value: A): FieldState[A] = Valid(value)
-
-    def fromEither[A](either: Either[String, A]): FieldState[A] =
-      either match {
-        case Left(reason) => Invalid(reason)
-        case Right(value) => Valid(value)
-      }
-  }
-
   def render[A](form: Form[A]): HtmlElement = {
     val (fieldsHtml, fieldsSignal) = renderField(form.fields)
     val submitted = new EventBus[Unit]
@@ -53,62 +30,58 @@ object Render {
       div(className := "p-2", label(lbl))
     def renderInput(input: HtmlElement): HtmlElement =
       div(className := "col-span-3", input)
-    def renderValidationMessage(
-        invalid: Signal[Option[String]]
+    def renderValidation(
+        validationState: Signal[ValidationState]
     ): HtmlElement =
-      div(
-        className <-- invalid.map(msg =>
-          if (msg.isDefined) "visible" else "invisible"
+      p(
+        className <-- validationState.map(v =>
+          if (v.toOption.isDefined) "visible col-end-5 col-span-3 text-red-500"
+          else "invisible p-2"
         ),
-        invalid.map(msg =>
-          msg match {
-            case None        => ""
-            case Some(value) => value
+        child <-- validationState.map(v =>
+          v.toOption match {
+            case Some(message) => message
+            case None          => ""
           }
         )
       )
     def renderLabelAndInput(
         label: Option[String],
         input: HtmlElement,
-        invalid: Signal[Option[String]]
+        validationState: Signal[ValidationState]
     ): HtmlElement =
       div(
-        className := "grid grid-cols-4 gap-2 p-2",
+        className := "grid grid-cols-4 gap-x-2 gap-y-1 p-2",
         renderLabel(label),
         renderInput(input),
-        renderValidationMessage(invalid)
+        renderValidation(validationState)
       )
 
     field match {
-      case TextField(lbl, iV, ph, validation) =>
-        val state = Var(FieldState.initialized[String])
-        val output = Var(iV.getOrElse(""))
-        val formInput =
-          div(
-            className := "col-span-3",
-            input(
-              typ := "text",
-              className := "ring-2 ring-sky-500 rounded-md border-2 border-sky-500 p-2",
-              // initial value takes precedence over placeholder
-              iV.map(iV => value := iV)
-                .orElse(ph.map(ph => placeholder := ph)),
-              onInput.mapToValue --> output,
-              onInput.mapToValue.map(v =>
-                FieldState.fromEither(validation(v))
-              ) --> state
-            )
+      case TextField(label, iV, ph, validation) =>
+        val validationState = Var(ValidationState.unchecked)
+        val validate: Observer[String] =
+          validationState.writer.contramap(str =>
+            ValidationState.fromEither(validation(str))
           )
+        val output = Var(iV.getOrElse(""))
         val html =
           renderLabelAndInput(
-            lbl,
-            formInput,
-            state.signal.map(s =>
-              s match {
-                case FieldState.Initialized  => None
-                case FieldState.Valid(_)     => None
-                case FieldState.Invalid(msg) => Some(msg)
-              }
-            )
+            label,
+            div(
+              className := "col-span-3",
+              input(
+                typ := "text",
+                className := "ring-2 ring-sky-500 rounded-md border-2 border-sky-500 p-2",
+                // initial value takes precedence over placeholder
+                iV.map(iV => value := iV)
+                  .orElse(ph.map(ph => placeholder := ph)),
+                onInput.mapToValue --> output,
+                onBlur.mapToValue --> validate,
+                onChange.mapToValue --> validate
+              )
+            ),
+            validationState.signal
           )
         (html, output.signal)
 
@@ -125,7 +98,8 @@ object Render {
                     className := "mr-2 my-2 border-2 border-sky-500",
                     typ := "checkbox"
                   )
-                )
+                ),
+                Signal.fromValue(ValidationState.valid)
               )
             case Choice(trueChoice @ _, falseChoice @ _) =>
               renderLabelAndInput(
@@ -133,7 +107,8 @@ object Render {
                 div(
                   className := "col-span-3",
                   input(typ := "checkbox")
-                )
+                ),
+                Signal.fromValue(ValidationState.valid)
               )
           }
 
