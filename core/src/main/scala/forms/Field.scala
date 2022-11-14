@@ -9,6 +9,7 @@ sealed trait Field[A] {
 
   def zip[B](that: Field[B]): Field[(A, B)] =
     product(that)
+
 }
 object Field {
   final case class Product[A, B](left: Field[A], right: Field[B])
@@ -17,7 +18,8 @@ object Field {
   final case class TextField(
       label: Option[String],
       initialValue: Option[String],
-      placeholder: Option[String]
+      placeholder: Option[String],
+      validation: String => Either[String, String]
   ) extends Field[String] {
     def withLabel(label: String): TextField =
       this.copy(label = Some(label))
@@ -27,6 +29,11 @@ object Field {
 
     def withPlaceholder(placeholder: String): TextField =
       this.copy(placeholder = Some(placeholder))
+
+    def withValidation(
+        validation: String => Either[String, String]
+    ): TextField =
+      this.copy(validation = validation)
   }
 
   final case class BooleanField(
@@ -44,8 +51,13 @@ object Field {
       this.copy(initialValue = Some(initialValue))
   }
 
+  /** Validation method that always returns the given value. I.e. is always
+    * valid.
+    */
+  def always[A](value: A): Either[String, A] = Right(value)
+
   val text: TextField =
-    TextField(None, None, None)
+    TextField(None, None, None, always)
 
   val boolean: BooleanField =
     BooleanField(Style.boolean.checkbox, None, None)
